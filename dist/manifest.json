@@ -1,0 +1,21 @@
+{
+  "name": "Wisdom Circle Dashboard",
+  "short_name": "Wisdom Dash",
+  "description": "Premium Management Dashboard for Wisdom Circle Community",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0c",
+  "theme_color": "#ffba08",
+  "icons": [
+    {
+      "src": "https://i.postimg.cc/pTMThBRy/serverbanner.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://i.postimg.cc/pTMThBRy/serverbanner.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

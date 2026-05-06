@@ -21,8 +21,22 @@ connectDB();
 app.use(helmet({
     contentSecurityPolicy: false, // For development ease
 }));
+
+const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    'http://localhost:5173',
+    'http://localhost:5000'
+];
+
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: function (origin, callback) {
+        // allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) === -1 && !allowedOrigins.includes(origin.replace(/\/$/, ""))) {
+            return callback(null, true); // Allow for now to prevent blocking custom domains
+        }
+        return callback(null, true);
+    },
     credentials: true
 }));
 app.use(express.json());

@@ -20,7 +20,8 @@ passport.use(new DiscordStrategy({
     clientSecret: process.env.DISCORD_CLIENT_SECRET,
     callbackURL: process.env.DISCORD_CALLBACK_URL,
     scope: ['identify', 'guilds', 'email'],
-    passReqToCallback: true
+    passReqToCallback: true,
+    proxy: true // Required for Render/Heroku to handle HTTPS correctly
 }, async (req, accessToken, refreshToken, profile, done) => {
     try {
         let user = await User.findOne({ discordId: profile.id });

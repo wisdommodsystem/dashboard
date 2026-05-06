@@ -89,6 +89,24 @@ router.get('/leaderboard', ensureRoleAdmin, async (req, res) => {
                                     cond: { $in: ["$$a.category", ["Mute", "Mutes"]] }
                                 }
                             }
+                        },
+                        moderation: {
+                            $size: {
+                                $filter: {
+                                    input: "$actions",
+                                    as: "a",
+                                    cond: { $eq: ["$$a.category", "Moderation"] }
+                                }
+                            }
+                        },
+                        roles: {
+                            $size: {
+                                $filter: {
+                                    input: "$actions",
+                                    as: "a",
+                                    cond: { $eq: ["$$a.category", "Role"] }
+                                }
+                            }
                         }
                     }
                 }
@@ -100,6 +118,51 @@ router.get('/leaderboard', ensureRoleAdmin, async (req, res) => {
     } catch (err) {
         console.error('Leaderboard error:', err);
         res.status(500).json({ message: 'Error calculating performance stats' });
+    }
+});
+
+// @route   GET /api/staff-stats/logs/:moderatorId
+// @desc    Get detailed logs for a specific moderator
+router.get('/logs/:moderatorId', ensureRoleAdmin, async (req, res) => {
+    try {
+        const { moderatorId } = req.params;
+        const { limit = 50, page = 1, period = 'all' } = req.query;
+
+        // Apply same date filter as leaderboard for consistency if requested
+        let query = { 
+            $or: [
+                { moderatorId: moderatorId },
+                { moderatorId: moderatorId.toString() }
+            ]
+        };
+
+        const now = new Date();
+        if (period === 'day') {
+            query.timestamp = { $gte: new Date(now.setHours(0,0,0,0)) };
+        } else if (period === 'week') {
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            query.timestamp = { $gte: weekAgo };
+        } else if (period === 'month') {
+            const monthAgo = new Date(now.setMonth(now.getMonth() - 1));
+            query.timestamp = { $gte: monthAgo };
+        }
+
+        const logs = await Log.find(query)
+            .sort({ timestamp: -1 })
+            .limit(parseInt(limit))
+            .skip((parseInt(page) - 1) * parseInt(limit));
+
+        const total = await Log.countDocuments(query);
+
+        res.json({
+            logs,
+            total,
+            page: parseInt(page),
+            pages: Math.ceil(total / parseInt(limit))
+        });
+    } catch (err) {
+        console.error('Staff logs error:', err);
+        res.status(500).json({ message: 'Error fetching staff logs' });
     }
 });
 

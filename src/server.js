@@ -1,13 +1,15 @@
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const session = require('express-session');
+const MongoStore = require('connect-mongo').default;
+const mongoose = require('mongoose');
 const passport = require('passport');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const connectDB = require('./config/db');
 require('./config/passport');
-require('dotenv').config();
 
 const app = express();
 
@@ -24,16 +26,16 @@ app.use(helmet({
 
 const allowedOrigins = [
     process.env.FRONTEND_URL,
+    'https://panel.malahida.com',
     'http://localhost:5173',
     'http://localhost:5000'
 ];
 
 app.use(cors({
     origin: function (origin, callback) {
-        // allow requests with no origin (like mobile apps or curl requests)
         if (!origin) return callback(null, true);
         if (allowedOrigins.indexOf(origin) === -1 && !allowedOrigins.includes(origin.replace(/\/$/, ""))) {
-            return callback(null, true); // Allow for now to prevent blocking custom domains
+            return callback(new Error('Not allowed by CORS')); 
         }
         return callback(null, true);
     },
@@ -42,15 +44,21 @@ app.use(cors({
 app.use(express.json());
 app.use(morgan('dev'));
 
-// Session
+// Session with MongoDB Store for production stability
 app.use(session({
     secret: process.env.SESSION_SECRET || 'wisdom-circle-secret',
     resave: false,
-    saveUninitialized: true, // Set to true to ensure session is created
+    saveUninitialized: false,
+    store: MongoStore.create({
+        mongoUrl: process.env.MONGO_URI,
+        collectionName: 'sessions',
+        ttl: 14 * 24 * 60 * 60 // 14 days
+    }),
     cookie: {
-        secure: false, // Set to false because we are using HTTP on the IP address
+        secure: process.env.NODE_ENV === 'production', 
         httpOnly: true,
-        maxAge: 1000 * 60 * 60 * 24 * 7 // 1 week
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 1000 * 60 * 60 * 24 * 14 // 14 days
     }
 }));
 
@@ -96,13 +104,23 @@ if (process.env.NODE_ENV === 'production' || require('fs').existsSync(frontendPa
 }
 
 const { initJailScheduler } = require('./services/jailScheduler');
+const { client } = require('./services/discordBot');
 
 const PORT = process.env.SERVER_PORT || process.env.PORT || 5000;
 app.listen(PORT, async () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV}`);
     
-    // Wait a bit for Discord bot to be ready, then initialize jail scheduler
+    // Ensure Discord client is ready
+    if (client.isReady()) {
+        console.log('Discord Bot is already ready');
+    } else {
+        client.once('ready', () => {
+            console.log('Discord Bot now ready for Dashboard stats');
+        });
+    }
+    
+    // Wait a bit for Discord bot to be fully settled, then initialize jail scheduler
     setTimeout(async () => {
         await initJailScheduler();
     }, 3000);

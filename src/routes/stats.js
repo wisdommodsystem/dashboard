@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getStats } = require('../services/discordBot');
+const { getStats, getVoiceActivity, getStaffMembers } = require('../services/discordBot');
 const { ensureStaffOrAdmin } = require('../middleware/auth');
 const Log = require('../models/Log');
 
@@ -17,6 +17,28 @@ router.get('/', ensureStaffOrAdmin, async (req, res) => {
         res.status(500).json({ message: 'Error fetching stats' });
     }
 });
+// @route   GET /api/stats/voice
+// @desc    Get current voice activity (populated channels)
+router.get('/voice', ensureStaffOrAdmin, async (req, res) => {
+    try {
+        const voiceActivity = await getVoiceActivity();
+        res.json(voiceActivity);
+    } catch (err) {
+        res.status(500).json({ message: 'Error fetching voice activity' });
+    }
+});
+
+// @route   GET /api/stats/staff
+// @desc    Get staff members list
+router.get('/staff', ensureStaffOrAdmin, async (req, res) => {
+    try {
+        const staff = await getStaffMembers();
+        res.json(staff);
+    } catch (err) {
+        res.status(500).json({ message: 'Error fetching staff members' });
+    }
+});
+
 const { scrapeServerInfo } = require('../services/botlistScraper');
 
 // @route   GET /api/stats/external

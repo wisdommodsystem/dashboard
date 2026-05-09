@@ -21,9 +21,14 @@ passport.use(new DiscordStrategy({
     callbackURL: process.env.DISCORD_CALLBACK_URL,
     scope: ['identify', 'guilds', 'email'],
     passReqToCallback: true,
-    proxy: true // Required for Render/Heroku to handle HTTPS correctly
+    proxy: true
 }, async (req, accessToken, refreshToken, profile, done) => {
     try {
+        if (!accessToken) {
+            console.error('[Auth] Critical: No Access Token received from Discord');
+        }
+        console.log(`[Auth] Successful Token Exchange for: ${profile.username}`);
+        
         let user = await User.findOne({ discordId: profile.id });
         
         const ip = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -48,6 +53,10 @@ passport.use(new DiscordStrategy({
         
         return done(null, user);
     } catch (err) {
+        console.error('[Auth] Discord Strategy Error:', err);
+        if (err.oauthError) {
+            console.error('[Auth] OAuth Error Details:', err.oauthError);
+        }
         return done(err, null);
     }
 }));

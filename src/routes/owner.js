@@ -148,10 +148,14 @@ router.post('/update-status', ensureOwner, async (req, res) => {
 });
 
 // @route   GET /api/owner/inactive-staff
-// @desc    Get only resting or dismissed staff for dashboard warnings
+// @desc    Get only resting or dismissed staff for dashboard warnings (Filtered to last 48h)
 router.get('/inactive-staff', ensureRoleAdmin, async (req, res) => {
     try {
-        const inactive = await StaffStatus.find({ status: { $ne: 'active' } });
+        const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+        const inactive = await StaffStatus.find({ 
+            status: { $ne: 'active' },
+            updatedAt: { $gte: twoDaysAgo }
+        });
         res.json(inactive);
     } catch (err) {
         res.status(500).json({ message: 'Error fetching inactive staff' });

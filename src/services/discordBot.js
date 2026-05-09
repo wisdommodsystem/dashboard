@@ -11,18 +11,22 @@ const client = new Client({
         GatewayIntentBits.GuildModeration,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.GuildPresences
     ],
     // RAM Optimization: Limit internal caching to stay within 500MB
     makeCache: Options.cacheWithLimits({
-        MessageManager: 0, // Don't cache messages in RAM
-        PresenceManager: 0, // Don't cache user status
+        MessageManager: 0,
+        PresenceManager: 0,
         GuildMemberManager: {
-            maxSize: 100, // Only keep 100 recent members in memory
+            maxSize: 100,
             keepOverLimit: (member) => member.id === client.user?.id,
         },
-        UserManager: 100, // Limit user objects
-        VoiceStateManager: 200, // Limit voice state cache
+        UserManager: 100,
+        VoiceStateManager: {
+            maxSize: 500, // Increase this to store more voice states
+            keepOverLimit: () => true
+        },
         ReactionManager: 0,
         ThreadManager: 0
     })
@@ -104,6 +108,124 @@ const getStats = async () => {
         name: guild.name,
         icon: guild.iconURL()
     };
+};
+
+const getVoiceActivity = async () => {
+    try {
+        const guild = await getGuild();
+        if (!guild) {
+            console.error('[VoiceStats] CRITICAL: Guild not found. Check DISCORD_GUILD_ID');
+            return [];
+        }
+
+        // Force fetch channels to ensure cache is populated
+        await guild.channels.fetch().catch(e => console.error('[VoiceStats] Fetch channels error:', e.message));
+
+        const voiceActivity = [];
+        const voiceChannels = guild.channels.cache.filter(c => c.type === 2); // 2 = GuildVoice
+
+        console.log(`[VoiceStats] Found ${voiceChannels.size} voice channels in cache`);
+
+        voiceChannels.forEach(channel => {
+            // channel.members works if GuildVoiceStates intent is active
+            const members = channel.members.map(m => ({
+                id: m.id,
+                username: m.user.username,
+                displayName: m.displayName,
+                avatar: m.user.displayAvatarURL({ size: 64, extension: 'png' })
+            }));
+
+            if (members.length > 0) {
+                console.log(`[VoiceStats] Channel "${channel.name}" has ${members.length} members`);
+                voiceActivity.push({
+                    id: channel.id,
+                    name: channel.name,
+                    userCount: members.length,
+                    members
+                });
+            }
+        });
+
+        if (voiceActivity.length === 0) {
+            console.log('[VoiceStats] No active voice users found in any channel.');
+        }
+
+        return voiceActivity.sort((a, b) => b.userCount - a.userCount);
+    } catch (err) {
+        console.error('[VoiceStats] Global Error:', err);
+        return [];
+    }
+};
+
+// Global variable to cache staff members in memory
+let cachedStaffMembers = null;
+let lastStaffFetchTime = 0;
+const STAFF_CACHE_TTL = 12 * 60 * 60 * 1000; // 12 hours
+
+const getStaffMembers = async () => {
+    try {
+        const now = Date.now();
+        // Return from cache if it exists and hasn't expired
+        if (cachedStaffMembers && (now - lastStaffFetchTime < STAFF_CACHE_TTL)) {
+            console.log('[StaffList] Returning from memory cache');
+            return cachedStaffMembers;
+        }
+
+        const guild = await getGuild();
+        if (!guild) return [];
+
+        const staffRoleIds = [
+            process.env.OWNER_ROLE_ID,
+            process.env.ADMINISTRATOR_ROLEID,
+            process.env.STAFFROLE_ID,
+            process.env.JUNIOR_STAFF_ROLEID
+        ].filter(id => id);
+
+        const staffMap = new Map();
+
+        // Fetch members with roles (more robust than cache only)
+        for (const roleId of staffRoleIds) {
+            try {
+                const members = await guild.members.fetch({ role: roleId, force: true });
+                members.forEach(m => staffMap.set(m.id, m));
+            } catch (roleErr) {
+                console.warn(`[StaffList] Could not fetch members for role ${roleId}:`, roleErr.message);
+            }
+        }
+
+        const staffList = Array.from(staffMap.values())
+            .filter(m => staffRoleIds.some(roleId => m.roles.cache.has(roleId)))
+            .map(m => {
+                let primaryRole = 'Staff';
+                if (process.env.OWNER_ROLE_ID && m.roles.cache.has(process.env.OWNER_ROLE_ID)) primaryRole = 'Owner';
+                else if (process.env.ADMINISTRATOR_ROLEID && m.roles.cache.has(process.env.ADMINISTRATOR_ROLEID)) primaryRole = 'Admin';
+                else if (process.env.STAFFROLE_ID && m.roles.cache.has(process.env.STAFFROLE_ID)) primaryRole = 'Staff';
+                else if (process.env.JUNIOR_STAFF_ROLEID && m.roles.cache.has(process.env.JUNIOR_STAFF_ROLEID)) primaryRole = 'Junior';
+
+                return {
+                    id: m.id,
+                    username: m.user.username,
+                    displayName: m.displayName,
+                    avatar: m.user.displayAvatarURL({ size: 64, extension: 'png' }),
+                    status: m.presence?.status || 'offline',
+                    primaryRole
+                };
+            }).sort((a, b) => {
+                const hierarchy = { 'Owner': 1, 'Admin': 2, 'Staff': 3, 'Junior': 4 };
+                return (hierarchy[a.primaryRole] || 5) - (hierarchy[b.primaryRole] || 5);
+            });
+
+        // Update memory cache
+        cachedStaffMembers = staffList;
+        lastStaffFetchTime = now;
+        console.log(`[StaffList] Cache updated with ${staffList.length} members`);
+
+        return staffList;
+    } catch (err) {
+        console.error('[StaffList] Global Error:', err);
+        // Return stale cache if error occurs, or empty array if no cache
+        return cachedStaffMembers || [];
+    }
 };
 
 const getMembers = async () => {
@@ -602,5 +724,5 @@ if (process.env.DISCORD_BOT_TOKEN) {
     client.login(process.env.DISCORD_BOT_TOKEN);
 }
 
-module.exports = { client, getStats, getMembers, getRoles, getChannels, getGuild, jailMember, unjailMember, rejectMember, unrejectMember, warnMember, sendAnnouncement, kickMember, banMember, getBans, unbanMember, muteMember, changeNickname };
+module.exports = { client, getStats, getVoiceActivity, getStaffMembers, getMembers, getRoles, getChannels, getGuild, jailMember, unjailMember, rejectMember, unrejectMember, warnMember, sendAnnouncement, kickMember, banMember, getBans, unbanMember, muteMember, changeNickname };
 

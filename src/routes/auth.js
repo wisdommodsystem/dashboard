@@ -61,37 +61,53 @@ const axios = require('axios');
 
 // @route   GET /api/auth/discord/callback
 // @desc    Discord authentication callback
-router.get('/discord/callback', passport.authenticate('discord', {
-    failureRedirect: '/login'
-}), async (req, res) => {
-    // Successful authentication
-    const user = req.user;
-    
-    // Send webhook if URL is provided in .env
-    if (process.env.WEBHOOK_LOGIN) {
-        try {
-            const embed = {
-                title: '🔐 New Dashboard Login',
-                color: 0x5865F2,
-                fields: [
-                    { name: 'User', value: `<@${user.discordId}> (${user.username})`, inline: true },
-                    { name: 'Email', value: user.email || 'No Email provided', inline: true },
-                    { name: 'IP Address', value: user.lastIp || req.ip || req.headers['x-forwarded-for'] || 'Unknown', inline: false }
-                ],
-                thumbnail: { url: user.avatar ? `https://cdn.discordapp.com/avatars/${user.discordId}/${user.avatar}.png` : undefined },
-                timestamp: new Date().toISOString()
-            };
-            
-            await axios.post(process.env.WEBHOOK_LOGIN, {
-                username: 'Dashboard Security',
-                embeds: [embed]
-            });
-        } catch (webhookErr) {
-            console.error('Failed to send login webhook', webhookErr.message);
+router.get('/discord/callback', (req, res, next) => {
+    passport.authenticate('discord', (err, user, info) => {
+        if (err) {
+            console.error('[Auth] Passport Auth Error:', err);
+            // Check for specific OAuth errors
+            if (err.oauthError) {
+                console.error('[Auth] OAuth Error Details:', err.oauthError.data);
+            }
+            return res.status(500).send(`Authentication failed: ${err.message || 'Unknown error'}`);
         }
-    }
+        if (!user) {
+            console.warn('[Auth] No user found in callback');
+            return res.redirect('/login?error=no_user');
+        }
+        req.logIn(user, async (loginErr) => {
+            if (loginErr) {
+                console.error('[Auth] Login Error:', loginErr);
+                return res.status(500).send('Login failed');
+            }
 
-    res.redirect((process.env.FRONTEND_URL || 'http://localhost:5173') + '/dashboard');
+            // Successful authentication
+            if (process.env.WEBHOOK_LOGIN) {
+                try {
+                    const embed = {
+                        title: '🔐 New Dashboard Login',
+                        color: 0x5865F2,
+                        fields: [
+                            { name: 'User', value: `<@${user.discordId}> (${user.username})`, inline: true },
+                            { name: 'Email', value: user.email || 'No Email provided', inline: true },
+                            { name: 'IP Address', value: user.lastIp || req.ip || req.headers['x-forwarded-for'] || 'Unknown', inline: false }
+                        ],
+                        thumbnail: { url: user.avatar ? `https://cdn.discordapp.com/avatars/${user.discordId}/${user.avatar}.png` : undefined },
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    await axios.post(process.env.WEBHOOK_LOGIN, {
+                        username: 'Dashboard Security',
+                        embeds: [embed]
+                    });
+                } catch (webhookErr) {
+                    console.error('Failed to send login webhook', webhookErr.message);
+                }
+            }
+
+            return res.redirect((process.env.FRONTEND_URL || 'http://localhost:5173') + '/dashboard');
+        });
+    })(req, res, next);
 });
 
 const { ensureStaffOrAdmin } = require('../middleware/auth');
